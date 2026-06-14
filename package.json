@@ -1,0 +1,13 @@
+{
+  "name": "loop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loop iOS MVP with a portable local Node server.",
+  "scripts": {
+    "server": "node server/server.js",
+    "server:reset": "rm -rf server/data && node server/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
