@@ -76,8 +76,8 @@ final class APIClient {
         )
     }
 
-    func feed(scope: FeedScope, token: String) async throws -> FeedResponse {
-        try await request("/api/feed?scope=\(scope.rawValue)", token: token)
+    func feed(scope: FeedScope, category: FeedCategory = .both, token: String) async throws -> FeedResponse {
+        try await request("/api/feed?scope=\(scope.rawValue)&category=\(category.rawValue)", token: token)
     }
 
     func discover(token: String) async throws -> DiscoverResponse {
@@ -151,11 +151,12 @@ final class APIClient {
         )
     }
 
-    func uploadLoop(videoURL: URL, caption: String, durationSeconds: Double, token: String) async throws -> LoopResponse {
+    func uploadLoop(videoURL: URL, caption: String, durationSeconds: Double, category: String, token: String) async throws -> LoopResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
         body.appendMultipartField(name: "caption", value: caption, boundary: boundary)
         body.appendMultipartField(name: "durationSeconds", value: String(format: "%.3f", durationSeconds), boundary: boundary)
+        body.appendMultipartField(name: "category", value: category, boundary: boundary)
         let videoData = try Data(contentsOf: videoURL)
         body.appendMultipartFile(
             name: "video",

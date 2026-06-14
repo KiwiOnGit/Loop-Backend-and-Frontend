@@ -38,8 +38,8 @@ struct CreateLoopView: View {
     }
     @State private var stage: CreateStage = .recording
     @State private var isAIGenerating = false
-
-    private let maxDuration = 6.0
+    @State private var maxDuration = 6.0
+    @State private var postCategory = "6s"
 
     init(draftCaption: Binding<String> = .constant(""), onUploaded: @escaping () -> Void) {
         self._draftCaption = draftCaption
@@ -93,7 +93,9 @@ struct CreateLoopView: View {
 
     private func triggerRecording() {
         if camera.isRecording {
-            camera.stopRecording()
+            camera.pauseRecording()
+        } else if camera.isPaused {
+            camera.resumeRecording(maxDuration: maxDuration)
         } else {
             let delay = selectedCountdownSetting
             if delay > 0 {
@@ -152,6 +154,7 @@ struct CreateLoopView: View {
                         VStack(spacing: 2) {
                             Image(systemName: "timer")
                             if selectedCountdownSetting > 0 {
+                                // Corrected string interpolation for Int countdown setting
                                 Text("\(selectedCountdownSetting)s")
                                     .font(.system(size: 8, weight: .black))
                             }
@@ -183,9 +186,9 @@ struct CreateLoopView: View {
                         Text("Create")
                             .font(LoopFont.logo(32))
                             .foregroundStyle(Color.loopGreen)
-                        Text("Hold it to six.")
+                        Text(camera.isPaused ? "Tap resume or checkmark." : (maxDuration == 6.0 ? "Hold it to six." : "Limit to 60s."))
                             .font(.system(size: 12, weight: .black))
-                            .foregroundStyle(.white.opacity(0.68))
+                            .foregroundStyle(camera.isPaused ? Color.loopGreen : .white.opacity(0.68))
                     }
 
                     Spacer()
@@ -212,7 +215,7 @@ struct CreateLoopView: View {
 
                     Text("\(camera.elapsed.oneDecimal)s")
                         .font(.system(size: 13, weight: .black))
-                        .foregroundStyle(camera.elapsed > 5.2 ? .loopWarm : .white)
+                        .foregroundStyle(camera.elapsed > (maxDuration - 0.8) ? .loopWarm : .white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(.black.opacity(0.46), in: Capsule())
@@ -245,21 +248,68 @@ struct CreateLoopView: View {
                     }
 
                     ProgressView(value: min(camera.elapsed / maxDuration, 1))
-                        .tint(camera.elapsed > 5.2 ? .loopWarm : Color.loopGreen)
+                        .tint(camera.elapsed > (maxDuration - 0.8) ? .loopWarm : Color.loopGreen)
                         .scaleEffect(y: 1.7)
                         .padding(.horizontal, 16)
 
+                    // Target duration selector when idle
+                    if !camera.isRecording && !camera.isPaused && camera.elapsed == 0 {
+                        HStack(spacing: 16) {
+                            Button {
+                                maxDuration = 6.0
+                            } label: {
+                                Text("6s Limit")
+                                    .font(.system(size: 11, weight: .black))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(maxDuration == 6.0 ? Color.loopGreen : Color.white.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button {
+                                maxDuration = 60.0
+                            } label: {
+                                Text("60s Limit")
+                                    .font(.system(size: 11, weight: .black))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(maxDuration == 60.0 ? Color.loopGreen : Color.white.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 4)
+                    }
+
                     HStack(spacing: 10) {
-                        PhotosPicker(selection: $selectedItem, matching: .videos) {
-                            Image(systemName: "photo.on.rectangle")
-                                .font(.system(size: 19, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 48, height: 48)
-                                .background(.white.opacity(0.12), in: Circle())
+                        // Left button: Photos Picker OR Discard/Retake
+                        if camera.isPaused {
+                            Button {
+                                camera.reset()
+                            } label: {
+                                Image(systemName: "trash.fill")
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 48, height: 48)
+                                    .background(Color.loopWarm.opacity(0.72), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            PhotosPicker(selection: $selectedItem, matching: .videos) {
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 48, height: 48)
+                                    .background(.white.opacity(0.12), in: Circle())
+                            }
+                            .disabled(camera.isRecording)
+                            .opacity(camera.isRecording ? 0 : 1)
                         }
 
                         Spacer()
 
+                        // Center button: Record / Pause / Resume
                         Button {
                             triggerRecording()
                         } label: {
@@ -268,10 +318,23 @@ struct CreateLoopView: View {
                                     .stroke(.white.opacity(0.72), lineWidth: 4)
                                     .frame(width: 78, height: 78)
 
-                                Circle()
-                                    .fill(camera.isRecording ? Color.loopWarm : Color.loopGreen)
-                                    .frame(width: camera.isRecording ? 42 : 58, height: camera.isRecording ? 42 : 58)
-                                    .animation(.snappy(duration: 0.18), value: camera.isRecording)
+                                if camera.isRecording {
+                                    Image(systemName: "pause.fill")
+                                        .font(.system(size: 22, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 58, height: 58)
+                                        .background(Color.loopWarm, in: Circle())
+                                } else if camera.isPaused {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 22, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 58, height: 58)
+                                        .background(Color.loopGreen, in: Circle())
+                                } else {
+                                    Circle()
+                                        .fill(Color.loopGreen)
+                                        .frame(width: 58, height: 58)
+                                }
                             }
                         }
                         .buttonStyle(.plain)
@@ -279,16 +342,32 @@ struct CreateLoopView: View {
 
                         Spacer()
 
-                        Button {
-                            camera.flip()
-                        } label: {
-                            Image(systemName: "camera.rotate.fill")
-                                .font(.system(size: 19, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 48, height: 48)
-                                .background(.white.opacity(0.12), in: Circle())
+                        // Right button: Done (Checkmark) OR Flip
+                        if camera.isPaused {
+                            Button {
+                                camera.finishRecording()
+                            } label: {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 48, height: 48)
+                                    .background(Color.loopGreen, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                camera.flip()
+                            } label: {
+                                Image(systemName: "camera.rotate.fill")
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 48, height: 48)
+                                    .background(.white.opacity(0.12), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(camera.isRecording)
+                            .opacity(camera.isRecording ? 0 : 1)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 30)
                     .padding(.bottom, 34)
@@ -530,6 +609,20 @@ struct CreateLoopView: View {
                         }
                         .padding(.top, 4)
                         
+                        // Category selection
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Post Category")
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundStyle(Color.loopInk)
+                            
+                            Picker("Post Category", selection: $postCategory) {
+                                Text("6s Video Category").tag("6s")
+                                Text("60s Video Category").tag("60s")
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        .padding(.top, 8)
+                        
                         Spacer(minLength: 30)
                         
                         // Post button
@@ -578,11 +671,12 @@ struct CreateLoopView: View {
             guard seconds <= maxDuration + 0.25 else {
                 selectedVideoURL = nil
                 durationSeconds = nil
-                errorMessage = "Loops must be 6 seconds or less."
+                errorMessage = "Loops must be \(Int(maxDuration)) seconds or less."
                 return
             }
             selectedVideoURL = url
             durationSeconds = min(seconds, maxDuration)
+            postCategory = seconds <= 6.25 ? "6s" : "60s"
             stage = .replaying
             
             // Trigger background on-device AI generation
@@ -739,6 +833,7 @@ struct CreateLoopView: View {
                 videoURL: selectedVideoURL,
                 caption: caption,
                 durationSeconds: durationSeconds,
+                category: postCategory,
                 token: token
             )
             caption = ""
@@ -857,12 +952,16 @@ final class LoopCameraController: NSObject, ObservableObject, AVCaptureFileOutpu
     @Published var isReady = false
     @Published var permissionDenied = false
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var elapsed = 0.0
     @Published var recordedURL: URL?
 
     private let movieOutput = AVCaptureMovieFileOutput()
     private var currentPosition: AVCaptureDevice.Position = .back
     private var timer: Timer?
+    
+    private var accumulatedDuration = 0.0
+    private var segmentURLs: [URL] = []
 
     func prepare() async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
@@ -880,29 +979,65 @@ final class LoopCameraController: NSObject, ObservableObject, AVCaptureFileOutpu
         }
         recordedURL = nil
         elapsed = 0
+        accumulatedDuration = 0
+        segmentURLs.removeAll()
+        isPaused = false
+        
+        startSegment(maxDuration: maxDuration)
+    }
+    
+    private func startSegment(maxDuration: Double) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         movieOutput.startRecording(to: url, recordingDelegate: self)
         isRecording = true
+        
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] timer in
             guard let self else { return }
             Task { @MainActor in
-                self.elapsed += 0.03
+                self.elapsed = self.accumulatedDuration + self.movieOutput.recordedDuration.seconds
                 if self.elapsed >= maxDuration {
                     timer.invalidate()
-                    self.stopRecording()
+                    self.finishRecording()
                 }
             }
         }
     }
-
-    func stopRecording() {
-        guard movieOutput.isRecording else {
-            return
-        }
+    
+    func pauseRecording() {
+        guard movieOutput.isRecording, !isPaused else { return }
+        timer?.invalidate()
+        isPaused = true
+        isRecording = false
+        accumulatedDuration = elapsed
         movieOutput.stopRecording()
+    }
+    
+    func resumeRecording(maxDuration: Double) {
+        guard isReady, !movieOutput.isRecording, isPaused else { return }
+        isPaused = false
+        startSegment(maxDuration: maxDuration)
+    }
+    
+    func finishRecording() {
+        timer?.invalidate()
+        isPaused = false
+        if movieOutput.isRecording {
+            movieOutput.stopRecording()
+        } else {
+            // If already stopped (e.g. tapped done while paused)
+            Task { await mergeAndPublishSegments() }
+        }
+    }
+    
+    func reset() {
         timer?.invalidate()
         isRecording = false
+        isPaused = false
+        elapsed = 0
+        accumulatedDuration = 0
+        recordedURL = nil
+        segmentURLs.removeAll()
     }
 
     func flip() {
@@ -917,11 +1052,82 @@ final class LoopCameraController: NSObject, ObservableObject, AVCaptureFileOutpu
         error: Error?
     ) {
         Task { @MainActor in
-            self.isRecording = false
-            self.timer?.invalidate()
             if error == nil {
-                self.recordedURL = outputFileURL
+                self.segmentURLs.append(outputFileURL)
+            } else {
+                print("[Loop] Segment recording error: \(String(describing: error))")
             }
+            
+            // If we are not paused, it means this was the final segment (either reached limit or tapped done)
+            if !self.isPaused {
+                self.isRecording = false
+                self.timer?.invalidate()
+                await self.mergeAndPublishSegments()
+            }
+        }
+    }
+    
+    private func mergeAndPublishSegments() async {
+        guard !segmentURLs.isEmpty else { return }
+        
+        if segmentURLs.count == 1 {
+            self.recordedURL = segmentURLs[0]
+            return
+        }
+        
+        // Stitch multiple segments
+        let composition = AVMutableComposition()
+        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+              let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            self.recordedURL = segmentURLs.first
+            return
+        }
+        
+        var currentTime = CMTime.zero
+        
+        for url in segmentURLs {
+            let asset = AVAsset(url: url)
+            do {
+                let assetVideoTracks = try await asset.loadTracks(withMediaType: .video)
+                let assetAudioTracks = try await asset.loadTracks(withMediaType: .audio)
+                
+                if let firstVideoTrack = assetVideoTracks.first {
+                    let duration = try await asset.load(.duration)
+                    let timeRange = CMTimeRange(start: .zero, duration: duration)
+                    try videoTrack.insertTimeRange(timeRange, of: firstVideoTrack, at: currentTime)
+                    
+                    // Keep orientation from the first segment
+                    if currentTime == .zero {
+                        videoTrack.preferredTransform = try await firstVideoTrack.load(.preferredTransform)
+                    }
+                    
+                    if let firstAudioTrack = assetAudioTracks.first {
+                        try audioTrack.insertTimeRange(timeRange, of: firstAudioTrack, at: currentTime)
+                    }
+                    
+                    currentTime = CMTimeAdd(currentTime, duration)
+                }
+            } catch {
+                print("[Loop] Error loading tracks for merging: \(error)")
+            }
+        }
+        
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        
+        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            self.recordedURL = segmentURLs.first
+            return
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .mov
+        exportSession.shouldOptimizeForNetworkUse = true
+        
+        await exportSession.export()
+        if exportSession.status == .completed {
+            self.recordedURL = outputURL
+        } else {
+            print("[Loop] Segment merge export failed: \(String(describing: exportSession.error))")
+            self.recordedURL = segmentURLs.first
         }
     }
 

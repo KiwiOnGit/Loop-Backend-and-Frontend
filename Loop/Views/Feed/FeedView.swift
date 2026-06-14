@@ -6,6 +6,7 @@ struct FeedView: View {
     let onCreateFromRemix: (String) -> Void
 
     @State private var scope: FeedScope = .forYou
+    @State private var selectedCategory: FeedCategory = .both
     @State private var loops: [LoopClip] = []
     @State private var activeLoopID: LoopClip.ID?
     @State private var isLoading = false
@@ -55,7 +56,7 @@ struct FeedView: View {
                     }
                 }
 
-                FeedHeader(scope: $scope)
+                FeedHeader(scope: $scope, category: $selectedCategory)
                     .padding(.horizontal, 16)
                     .padding(.top, 54) // Keep header below safe area notch
             }
@@ -66,6 +67,9 @@ struct FeedView: View {
             await loadFeed()
         }
         .onChange(of: scope) {
+            Task { await loadFeed() }
+        }
+        .onChange(of: selectedCategory) {
             Task { await loadFeed() }
         }
         .onChange(of: loops.map(\.id)) { _, ids in
@@ -107,7 +111,7 @@ struct FeedView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            loops = try await session.apiClient.feed(scope: scope, token: token).loops
+            loops = try await session.apiClient.feed(scope: scope, category: selectedCategory, token: token).loops
             activeLoopID = loops.first?.id
         } catch {
             errorMessage = error.localizedDescription
@@ -145,6 +149,7 @@ struct FeedView: View {
 
 private struct FeedHeader: View {
     @Binding var scope: FeedScope
+    @Binding var category: FeedCategory
 
     var body: some View {
         HStack(spacing: 12) {
@@ -170,6 +175,26 @@ private struct FeedHeader: View {
             }
 
             Spacer()
+
+            // Category filter menu
+            Menu {
+                Picker("Feed Category", selection: $category) {
+                    ForEach(FeedCategory.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    Text(category.title)
+                }
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.32), in: Capsule())
+                .shadow(color: .black.opacity(0.25), radius: 4)
+            }
         }
     }
 }

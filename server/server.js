@@ -17,7 +17,7 @@ const VIDEO_DIR = path.join(DATA_DIR, "videos");
 const AVATAR_DIR = path.join(DATA_DIR, "avatars");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 const MAX_VIDEO_BYTES = Number(process.env.LOOP_MAX_VIDEO_MB || 80) * 1024 * 1024;
-const MAX_DURATION_SECONDS = 6;
+const MAX_DURATION_SECONDS = 60;
 const DURATION_TOLERANCE_SECONDS = 0.25;
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const SECRET = process.env.LOOP_SECRET || "loop-local-dev-secret-change-me";
@@ -411,6 +411,7 @@ function formatLoop(req, loop, viewerId) {
     id: loop.id,
     caption: loop.caption,
     durationSeconds: loop.durationSeconds,
+    category: loop.category || (loop.durationSeconds <= 6.25 ? "6s" : "60s"),
     videoURL: loop.videoURL || absoluteURL(req, `/videos/${encodeURIComponent(loop.videoFileName)}`),
     thumbnailURL: null,
     createdAt: loop.createdAt,
@@ -910,6 +911,7 @@ async function route(req, res) {
   if (req.method === "GET" && pathname === "/api/feed") {
     const viewer = getBearerUser(req);
     const scope = url.searchParams.get("scope") || "forYou";
+    const categoryQuery = url.searchParams.get("category") || "both";
     const followingIds = new Set(
       db.follows.filter((follow) => follow.followerId === viewer.id).map((follow) => follow.followingId)
     );
@@ -917,6 +919,13 @@ async function route(req, res) {
     if (scope === "following") {
       loops = loops.filter((loop) => loop.creatorId === viewer.id || followingIds.has(loop.creatorId));
     }
+    
+    if (categoryQuery === "6s") {
+      loops = loops.filter((loop) => loop.category === "6s" || (!loop.category && loop.durationSeconds <= 6.25));
+    } else if (categoryQuery === "60s") {
+      loops = loops.filter((loop) => loop.category === "60s" || (!loop.category && loop.durationSeconds > 6.25));
+    }
+    
     loops.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     sendJSON(res, 200, { loops: loops.map((loop) => formatLoop(req, loop, viewer.id)) });
     return;
@@ -988,7 +997,7 @@ async function route(req, res) {
       return;
     }
     if (durationSeconds > MAX_DURATION_SECONDS + DURATION_TOLERANCE_SECONDS) {
-      sendError(res, 400, "Loop videos must be 6 seconds or less.", {
+      sendError(res, 400, `Loop videos must be ${MAX_DURATION_SECONDS} seconds or less.`, {
         durationSeconds: Number(durationSeconds.toFixed(2)),
         maxDurationSeconds: MAX_DURATION_SECONDS
       });
@@ -997,6 +1006,7 @@ async function route(req, res) {
 
     const videoFileName = `${makeId("loop")}${ext}`;
     const caption = String(fields.caption || "").trim().slice(0, 220);
+    const category = fields.category === "60s" ? "60s" : "6s";
     
     // Attempt cloud video upload, fallback to local file
     const cloudURL = await uploadToCloudinary(upload.data, ext);
@@ -1006,6 +1016,7 @@ async function route(req, res) {
       creatorId: viewer.id,
       caption,
       durationSeconds: Math.min(MAX_DURATION_SECONDS, Number(durationSeconds.toFixed(2))),
+      category,
       hashtags: extractHashtags(caption),
       mentions: extractMentions(caption),
       videoFileName: cloudURL ? null : videoFileName,

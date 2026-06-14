@@ -160,3 +160,19 @@ enum FeedScope: String, CaseIterable, Identifiable {
         }
     }
 }
+
+enum FeedCategory: String, CaseIterable, Identifiable {
+    case both = "both"
+    case sixSeconds = "6s"
+    case sixtySeconds = "60s"
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .both: "All"
+        case .sixSeconds: "6s Only"
+        case .sixtySeconds: "60s Only"
+        }
+    }
+}
