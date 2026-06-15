@@ -12,7 +12,7 @@ To solve this, this codebase implements:
 1. **Cloud Media Storage**: All recorded videos and user avatars are uploaded directly to **Cloudinary** via secure server-side Basic Authentication.
 2. **Encrypted Cloud Database**: The database file (`db.json`) is symmetrically encrypted on the server using AES-256-CBC (powered by your `LOOP_SECRET`) and saved securely to your Cloudinary account. On server startup, it is automatically downloaded, decrypted, and restored in memory.
 3. **Dynamic URL Resolution**: When the server starts up on Render, it automatically detects its public URL and publishes it to Cloudinary. The iOS app fetches this URL on launch, meaning you **never** have to copy-paste URLs or rebuild the app when the server restarts or sleeps!
-4. **Cloud Feed Catalogs**: Promoted video ads and Classic Vine archive videos are read from HTTPS JSON manifests in Cloudinary, then mixed into the For You feed as cloud-streamed video cards.
+4. **Cloud Feed Catalogs**: Optional promoted video cards and Classic Vine archive videos are read from HTTPS JSON manifests in Cloudinary, then mixed into the For You feed as cloud-streamed video cards. If no Vine manifest exists, the server can automatically discover short cloud-hosted Vine-style clips from Internet Archive metadata.
 
 ---
 
@@ -46,14 +46,18 @@ Render is a premium cloud host. Its free web service tier does **not** require a
    - `LOOP_REQUIRE_CLOUD_VIDEO_STREAMING`: Keep this as `1` or leave it unset so new uploads fail instead of falling back to ephemeral local storage.
    - `LOOP_ADS_MANIFEST_URL`: Optional custom HTTPS URL for your promoted-video ad catalog.
    - `LOOP_VINES_MANIFEST_URL`: Optional custom HTTPS URL for your Classic Vine archive catalog.
+   - `LOOP_AUTO_VINES`: Keep this as `1` or leave it unset to auto-fill Classic Vine cards from Internet Archive when your Vine catalog is missing. Set it to `0` to disable the fallback.
+   - `LOOP_AUTO_VINES_LIMIT`: Optional max number of auto-discovered Vine cards to cache per refresh. Defaults to `24`.
 6. **Done**: Render will build and deploy the server. Render automatically sets `RENDER_EXTERNAL_URL`, which the server detects and publishes to Cloudinary.
 
 ## Promoted Video Ads
 
-Upload a JSON file like `server/loop_ads.example.json` to Cloudinary as `loop_ads.json`, or set `LOOP_ADS_MANIFEST_URL` to any HTTPS JSON URL. Each ad entry needs a cloud `videoURL`, a `sponsorName`, a `provider` such as `google`, `apple`, or `direct`, and an optional `callToActionURL`.
+Google AdMob interstitials are integrated directly in the iOS app, so Google fills paid ads automatically. Debug builds use Google's test ad unit, and release builds use the production ad unit in `Loop/Services/AdvertisingService.swift`.
 
-The app labels these feed items as ads and the server inserts one after a randomized 5-10 normal feed videos. Use `provider: "google"`, `provider: "apple"`, or `provider: "direct"` in the ad catalog to track where each promoted video came from without making Xcode depend on an ad SDK package during ordinary builds.
+The server-side promoted-video catalog remains optional for direct sponsor clips. Upload a JSON file like `server/loop_ads.example.json` to Cloudinary as `loop_ads.json`, or set `LOOP_ADS_MANIFEST_URL` to any HTTPS JSON URL. Each ad entry needs a cloud `videoURL`, a `sponsorName`, a `provider`, and an optional `callToActionURL`.
 
 ## Classic Vine Archive
 
-Upload a JSON file like `server/loop_vines.example.json` to Cloudinary as `loop_vines.json`, or set `LOOP_VINES_MANIFEST_URL`. Only include Vine videos you have rights to redistribute. The server accepts only HTTPS video URLs, and the app renders these as read-only Classic Vine cards mixed into the For You feed.
+Upload a JSON file like `server/loop_vines.example.json` to Cloudinary as `loop_vines.json`, or set `LOOP_VINES_MANIFEST_URL`, when you want a curated archive. Only include Vine videos you have rights to redistribute.
+
+If that manifest is missing or empty, `LOOP_AUTO_VINES=1` makes the server query Internet Archive metadata, choose short HTTPS video files, and render them as read-only Classic Vine cards mixed into the For You feed. All Vine and UGC videos must resolve to HTTPS video URLs so the app streams them from the cloud.

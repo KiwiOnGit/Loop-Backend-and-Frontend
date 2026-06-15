@@ -109,6 +109,9 @@ LOOP_MAX_VIDEO_MB=80
 LOOP_REQUIRE_CLOUD_VIDEO_STREAMING=1
 LOOP_ADS_MANIFEST_URL=https://res.cloudinary.com/YOUR_CLOUD_NAME/raw/upload/loop_ads.json
 LOOP_VINES_MANIFEST_URL=https://res.cloudinary.com/YOUR_CLOUD_NAME/raw/upload/loop_vines.json
+LOOP_AUTO_VINES=1
+LOOP_AUTO_VINES_LIMIT=24
+LOOP_INTERNET_ARCHIVE_VINES_URL=https://archive.org/advancedsearch.php?q=title%3AVine%20AND%20mediatype%3Amovies&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&fl%5B%5D=date&rows=80&page=1&output=json
 ```
 
 Example:
@@ -167,7 +170,11 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 
 ## Ad and Vine Cloud Catalogs
 
-Loop reads promoted video ads from `LOOP_ADS_MANIFEST_URL` or, by default, `https://res.cloudinary.com/$CLOUDINARY_CLOUD_NAME/raw/upload/loop_ads.json`. It reads Classic Vine archive videos from `LOOP_VINES_MANIFEST_URL` or `loop_vines.json` in the same Cloudinary account.
+Loop monetizes the iOS feed with Google AdMob interstitials. Debug builds use Google's test interstitial unit; release builds use the production unit configured in [AdvertisingService.swift](/Users/elywright/Documents/Loop/Loop/Services/AdvertisingService.swift).
+
+The server can still read optional promoted video cards from `LOOP_ADS_MANIFEST_URL` or, by default, `https://res.cloudinary.com/$CLOUDINARY_CLOUD_NAME/raw/upload/loop_ads.json`. Those direct sponsor cards are separate from AdMob and are only used if you provide a catalog.
+
+Classic Vine archive videos come from `LOOP_VINES_MANIFEST_URL` or `loop_vines.json` in the same Cloudinary account. If that catalog is missing or empty, `LOOP_AUTO_VINES=1` lets the server discover short HTTPS video files from Internet Archive metadata and mix them into the For You feed automatically. Set `LOOP_AUTO_VINES=0` to disable that fallback.
 
 Use [server/loop_ads.example.json](/Users/elywright/Documents/Loop/server/loop_ads.example.json) and [server/loop_vines.example.json](/Users/elywright/Documents/Loop/server/loop_vines.example.json) as templates. Every `videoURL` must be HTTPS so the app streams the video from the cloud.
 - `GET /api/loops/:id/comments`

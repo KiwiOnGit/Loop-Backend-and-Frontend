@@ -37,6 +37,10 @@ const VINE_MANIFEST_URL = process.env.LOOP_VINES_MANIFEST_URL ||
   (CLOUDINARY_CLOUD_NAME ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/raw/upload/loop_vines.json` : "");
 const ADS_MANIFEST_URL = process.env.LOOP_ADS_MANIFEST_URL ||
   (CLOUDINARY_CLOUD_NAME ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/raw/upload/loop_ads.json` : "");
+const AUTO_VINES_ENABLED = process.env.LOOP_AUTO_VINES !== "0";
+const AUTO_VINES_LIMIT = Math.max(0, Math.min(50, Number(process.env.LOOP_AUTO_VINES_LIMIT || 24)));
+const INTERNET_ARCHIVE_VINE_SEARCH_URL = process.env.LOOP_INTERNET_ARCHIVE_VINES_URL ||
+  "https://archive.org/advancedsearch.php?q=title%3AVine%20AND%20mediatype%3Amovies&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&fl%5B%5D=date&rows=80&page=1&output=json";
 
 // AES-256-CBC Encryption Helpers
 function encrypt(text, secret) {
@@ -380,6 +384,162 @@ function normalizeAdEntry(entry, index) {
   };
 }
 
+function firstText(value, fallback = "") {
+  if (Array.isArray(value)) {
+    const found = value.map((item) => cleanText(item)).find(Boolean);
+    return found || fallback;
+  }
+  return cleanText(value, fallback);
+}
+
+function archiveDownloadURL(identifier, fileName) {
+  const encodedIdentifier = encodeURIComponent(identifier);
+  const encodedFileName = String(fileName)
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `https://archive.org/download/${encodedIdentifier}/${encodedFileName}`;
+}
+
+function archiveDetailsURL(identifier) {
+  return `https://archive.org/details/${encodeURIComponent(identifier)}`;
+}
+
+function archiveFileIsVideo(file) {
+  const name = cleanText(file?.name);
+  const format = cleanText(file?.format).toLowerCase();
+  return Boolean(
+    name &&
+    (
+      /\.(mp4|m4v|mov)$/i.test(name) ||
+      format.includes("mpeg4") ||
+      format.includes("mpeg-4") ||
+      format.includes("quicktime")
+    )
+  );
+}
+
+function archiveVideoFileScore(file) {
+  const name = cleanText(file?.name).toLowerCase();
+  const source = cleanText(file?.source).toLowerCase();
+  const length = Number(file?.length);
+  let score = 0;
+  if (source === "original") score += 4;
+  if (name.endsWith(".mp4")) score += 3;
+  if (Number.isFinite(length) && length <= 6.25) score += 3;
+  else if (Number.isFinite(length) && length <= 10) score += 1;
+  if (name.includes("ia.mp4") || name.includes("h.264")) score -= 1;
+  return score;
+}
+
+function archiveFileIsThumbnail(file) {
+  const name = cleanText(file?.name).toLowerCase();
+  const format = cleanText(file?.format).toLowerCase();
+  return Boolean(
+    name &&
+    (
+      format.includes("thumbnail") ||
+      name.includes("_itemimage") ||
+      name.includes("__ia_thumb") ||
+      /\.(jpg|jpeg|png|webp)$/i.test(name)
+    )
+  );
+}
+
+function archiveCreatedAt(metadata, doc) {
+  const rawDate = firstText(metadata?.date || doc?.date || metadata?.addeddate);
+  if (rawDate) {
+    const parsed = Date.parse(rawDate);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+    const year = rawDate.match(/\b(19|20)\d{2}\b/)?.[0];
+    if (year) {
+      return `${year}-01-01T00:00:00.000Z`;
+    }
+  }
+  return "2013-01-24T00:00:00.000Z";
+}
+
+function archiveHashtags(metadata, caption) {
+  const subjects = Array.isArray(metadata?.subject)
+    ? metadata.subject
+    : String(metadata?.subject || "").split(/[;,]/);
+  const archiveTags = subjects
+    .map((subject) => cleanText(subject).replace(/^#/, "").toLowerCase().replace(/[^a-z0-9_]+/g, ""))
+    .filter((tag) => tag && tag.length <= 24)
+    .slice(0, 3);
+  return Array.from(new Set([...extractHashtags(caption), ...archiveTags, "classicvine"])).slice(0, 5);
+}
+
+function normalizeInternetArchiveVine(doc, payload, index) {
+  const metadata = payload?.metadata || {};
+  const identifier = firstText(metadata.identifier || doc?.identifier);
+  if (!identifier) {
+    return null;
+  }
+  const files = Array.isArray(payload?.files) ? payload.files : [];
+  const videoFile = files
+    .filter(archiveFileIsVideo)
+    .sort((a, b) => archiveVideoFileScore(b) - archiveVideoFileScore(a))[0];
+  if (!videoFile?.name) {
+    return null;
+  }
+
+  const durationSeconds = normalizeCatalogDuration(videoFile.length || metadata.runtime || metadata.duration, 6);
+  if (durationSeconds > 10) {
+    return null;
+  }
+
+  const title = firstText(metadata.title || doc?.title, "Classic Vine");
+  const creatorName = firstText(metadata.creator || doc?.creator, "Classic Vine");
+  const videoURL = archiveDownloadURL(identifier, videoFile.name);
+  const thumbnailFile = files.find(archiveFileIsThumbnail);
+  return {
+    id: stableCatalogId("vine", videoURL, index),
+    caption: title,
+    durationSeconds,
+    videoURL,
+    thumbnailURL: thumbnailFile?.name ? archiveDownloadURL(identifier, thumbnailFile.name) : null,
+    createdAt: archiveCreatedAt(metadata, doc),
+    creatorName,
+    originalURL: archiveDetailsURL(identifier),
+    hashtags: archiveHashtags(metadata, title)
+  };
+}
+
+async function loadInternetArchiveVines(limit = AUTO_VINES_LIMIT) {
+  if (!AUTO_VINES_ENABLED || limit <= 0) {
+    return [];
+  }
+  try {
+    const body = await fetchURL(INTERNET_ARCHIVE_VINE_SEARCH_URL);
+    const payload = JSON.parse(body);
+    const docs = payload?.response?.docs;
+    if (!Array.isArray(docs) || !docs.length) {
+      return [];
+    }
+    const candidates = docs.slice(0, Math.min(docs.length, Math.max(limit * 2, 20)));
+    const results = await Promise.all(candidates.map(async (doc, index) => {
+      const identifier = firstText(doc?.identifier);
+      if (!identifier) {
+        return null;
+      }
+      try {
+        const metadataBody = await fetchURL(`https://archive.org/metadata/${encodeURIComponent(identifier)}`);
+        return normalizeInternetArchiveVine(doc, JSON.parse(metadataBody), index);
+      } catch (error) {
+        console.warn(`[loop] could not load Internet Archive item ${identifier}:`, error.message);
+        return null;
+      }
+    }));
+    return results.filter(Boolean).slice(0, limit);
+  } catch (error) {
+    console.warn("[loop] could not load automatic Classic Vine catalog:", error.message);
+    return [];
+  }
+}
+
 async function loadCloudCatalog(url, key, normalizer) {
   if (!url) {
     return [];
@@ -404,7 +564,7 @@ async function refreshCloudCatalogs(force = false) {
     loadCloudCatalog(VINE_MANIFEST_URL, "vines", normalizeVineEntry),
     loadCloudCatalog(ADS_MANIFEST_URL, "ads", normalizeAdEntry)
   ]);
-  vineCatalog = vines;
+  vineCatalog = vines.length ? vines : await loadInternetArchiveVines(AUTO_VINES_LIMIT);
   adCatalog = ads;
 }
 
@@ -436,7 +596,7 @@ function formatVineClip(vine) {
     id: vine.id,
     caption: vine.caption,
     durationSeconds: vine.durationSeconds,
-    category: vine.durationSeconds <= 6.25 ? "6s" : "60s",
+    category: vine.durationSeconds <= 7 ? "6s" : "60s",
     videoURL: vine.videoURL,
     thumbnailURL: vine.thumbnailURL,
     createdAt: vine.createdAt,
@@ -1082,6 +1242,7 @@ async function route(req, res) {
       storage: DATA_DIR,
       maxDurationSeconds: MAX_DURATION_SECONDS,
       cloudVideoStreamingRequired: REQUIRE_CLOUD_VIDEO_STREAMING,
+      autoVinesEnabled: AUTO_VINES_ENABLED,
       vineCatalogSize: vineCatalog.length,
       adCatalogSize: adCatalog.length
     });
@@ -1231,8 +1392,8 @@ async function route(req, res) {
       ? []
       : vineCatalog
           .filter((vine) => {
-            if (categoryQuery === "6s") return vine.durationSeconds <= 6.25;
-            if (categoryQuery === "60s") return vine.durationSeconds > 6.25;
+            if (categoryQuery === "6s") return vine.durationSeconds <= 7;
+            if (categoryQuery === "60s") return vine.durationSeconds > 7;
             return true;
           })
           .map(formatVineClip);

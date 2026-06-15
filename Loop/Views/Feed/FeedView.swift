@@ -14,6 +14,9 @@ struct FeedView: View {
     @State private var selectedComments: LoopClip?
     @State private var selectedSendLoop: LoopClip?
     @State private var selectedRemixLoop: LoopClip?
+    @State private var viewedFeedItemsSinceAd = 0
+    @State private var nextAdBreak = Int.random(in: 5...10)
+    @State private var lastAdBreakLoopID: LoopClip.ID?
 
     var body: some View {
         GeometryReader { proxy in
@@ -76,6 +79,7 @@ struct FeedView: View {
         .ignoresSafeArea()
         .task {
             await loadFeed()
+            await AdvertisingService.shared.preloadInterstitial()
         }
         .onChange(of: scope) {
             Task { await loadFeed() }
@@ -86,6 +90,11 @@ struct FeedView: View {
         .onChange(of: loops.map(\.id)) { _, ids in
             if activeLoopID == nil || !ids.contains(activeLoopID ?? "") {
                 activeLoopID = ids.first
+            }
+        }
+        .onChange(of: activeLoopID) { _, id in
+            Task {
+                await maybeShowInterstitialAd(activeLoopID: id)
             }
         }
         .sheet(item: $selectedComments) { loop in
@@ -154,6 +163,32 @@ struct FeedView: View {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func maybeShowInterstitialAd(activeLoopID: LoopClip.ID?) async {
+        guard let activeLoopID,
+              activeLoopID != lastAdBreakLoopID,
+              let activeLoop = loops.first(where: { $0.id == activeLoopID }),
+              activeLoop.clipSource != .ad,
+              selectedComments == nil,
+              selectedSendLoop == nil,
+              selectedRemixLoop == nil else {
+            return
+        }
+
+        lastAdBreakLoopID = activeLoopID
+        viewedFeedItemsSinceAd += 1
+        guard viewedFeedItemsSinceAd >= nextAdBreak else {
+            await AdvertisingService.shared.preloadInterstitial()
+            return
+        }
+
+        let didShowAd = await AdvertisingService.shared.presentInterstitialIfReady()
+        if didShowAd {
+            viewedFeedItemsSinceAd = 0
+            nextAdBreak = Int.random(in: 5...10)
         }
     }
 }
