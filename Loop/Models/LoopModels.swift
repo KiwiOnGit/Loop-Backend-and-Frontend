@@ -18,6 +18,7 @@ struct LoopClip: Codable, Identifiable, Equatable {
     let id: String
     let caption: String
     let durationSeconds: Double
+    let category: String?
     let videoURL: URL
     let thumbnailURL: URL?
     let createdAt: String
@@ -28,6 +29,133 @@ struct LoopClip: Codable, Identifiable, Equatable {
     var hashtags: [String]
     var mentions: [String]
     var commentsPreview: [LoopComment]
+    let source: LoopClipSource?
+    let sponsorName: String?
+    let provider: String?
+    let disclosure: String?
+    let callToActionURL: URL?
+}
+
+enum LoopClipSource: String, Codable, Equatable {
+    case ugc
+    case vine
+    case ad
+}
+
+extension LoopClip {
+    var clipSource: LoopClipSource {
+        source ?? .ugc
+    }
+
+    var isUserGenerated: Bool {
+        clipSource == .ugc
+    }
+
+    var isAd: Bool {
+        clipSource == .ad
+    }
+
+    var isVineArchive: Bool {
+        clipSource == .vine
+    }
+
+    var displayCaption: String {
+        LoopCaptionFormatter.display(caption)
+    }
+
+    var durationLabel: String {
+        let totalSeconds = max(0, Int(durationSeconds.rounded()))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return "\(minutes):\(String(format: "%02d", seconds))"
+    }
+}
+
+enum LoopCaptionFormatter {
+    static func display(_ rawCaption: String) -> String {
+        let trimmed = rawCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        var title: String?
+        var description: String?
+        var hashtags: String?
+        var unlabeledLines: [String] = []
+        var foundGeneratedLabels = false
+
+        for rawLine in trimmed.components(separatedBy: .newlines) {
+            let line = cleanedMarkdownLine(rawLine)
+            guard !line.isEmpty else {
+                continue
+            }
+
+            if let labeled = labeledValue(line) {
+                foundGeneratedLabels = true
+                switch labeled.label {
+                case "title", "caption":
+                    title = strippedWrappingQuotes(labeled.value)
+                case "description", "desc":
+                    description = strippedWrappingQuotes(labeled.value)
+                case "hashtags", "tags":
+                    hashtags = labeled.value
+                default:
+                    unlabeledLines.append(line)
+                }
+            } else {
+                unlabeledLines.append(line)
+            }
+        }
+
+        guard foundGeneratedLabels else {
+            return trimmed
+        }
+
+        if description == nil, !unlabeledLines.isEmpty {
+            description = unlabeledLines.joined(separator: " ")
+        }
+
+        return [title, description, hashtags]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    private static func cleanedMarkdownLine(_ rawLine: String) -> String {
+        rawLine
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func labeledValue(_ line: String) -> (label: String, value: String)? {
+        guard let separator = line.firstIndex(of: ":") else {
+            return nil
+        }
+        let label = line[..<separator]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let supportedLabels = ["title", "caption", "description", "desc", "hashtags", "tags"]
+        guard supportedLabels.contains(label) else {
+            return nil
+        }
+
+        let valueStart = line.index(after: separator)
+        let value = line[valueStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return (label, value)
+    }
+
+    private static func strippedWrappingQuotes(_ value: String) -> String {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.count >= 2 &&
+            ((result.hasPrefix("\"") && result.hasSuffix("\"")) ||
+             (result.hasPrefix("'") && result.hasSuffix("'"))) {
+            result.removeFirst()
+            result.removeLast()
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
 }
 
 struct LoopComment: Codable, Identifiable, Equatable {

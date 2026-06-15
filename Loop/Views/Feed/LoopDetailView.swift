@@ -37,14 +37,14 @@ struct LoopDetailView: View {
                         }
                     }
 
-                    Text(loop.caption.isEmpty ? "Untitled loop" : loop.caption)
+                    Text(loop.displayCaption.isEmpty ? "Untitled loop" : loop.displayCaption)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(.white)
 
                     HStack(spacing: 12) {
                         Label(loop.likeCount.compactCount, systemImage: "heart.fill")
                         Label(loop.commentCount.compactCount, systemImage: "bubble.left.fill")
-                        Label("0:06", systemImage: "timer")
+                        Label(loop.durationLabel, systemImage: "timer")
                     }
                     .font(.caption.weight(.black))
                     .foregroundStyle(.white.opacity(0.82))

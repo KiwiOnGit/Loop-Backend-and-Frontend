@@ -25,6 +25,7 @@
 		A00000000000000000000110 /* LoopNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* LoopNotificationService.swift */; };
 		A00000000000000000000111 /* LoopDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* LoopDetailView.swift */; };
 		A00000000000000000000112 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* Assets.xcassets */; };
+		A00000000000000000000113 /* AdvertisingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000014 /* AdvertisingService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 		A00000000000000000000011 /* LoopNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopNotificationService.swift; sourceTree = "<group>"; };
 		A00000000000000000000012 /* LoopDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopDetailView.swift; sourceTree = "<group>"; };
 		A00000000000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000000014 /* AdvertisingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvertisingService.swift; sourceTree = "<group>"; };
 		A00000000000000000000020 /* Loop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -101,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000004 /* APIClient.swift */,
+				A00000000000000000000014 /* AdvertisingService.swift */,
 				A00000000000000000000003 /* KeychainStore.swift */,
 				A00000000000000000000011 /* LoopNotificationService.swift */,
 				A00000000000000000000005 /* SessionStore.swift */,
@@ -269,6 +272,7 @@
 				A0000000000000000000010F /* InboxView.swift in Sources */,
 				A00000000000000000000110 /* LoopNotificationService.swift in Sources */,
 				A00000000000000000000111 /* LoopDetailView.swift in Sources */,
+				A00000000000000000000113 /* AdvertisingService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

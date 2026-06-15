@@ -26,21 +26,32 @@ struct FeedView: View {
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 0) {
                             ForEach($loops) { $loop in
-                                LoopClipCard(
-                                    loop: $loop,
-                                    isActive: activeLoopID == loop.id,
-                                    onOpenComments: { selectedComments = loop },
-                                    onSend: { selectedSendLoop = loop },
-                                    onRemix: { selectedRemixLoop = loop },
-                                    onToggleLike: { liked in
-                                        await toggleLike(loopID: loop.id, liked: liked)
-                                    },
-                                    onToggleFollow: { following in
-                                        await toggleFollow(userID: loop.creator.id, following: following)
-                                    }
-                                )
-                                .id(loop.id)
-                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                switch loop.clipSource {
+                                case .ad:
+                                    PromotedClipCard(loop: loop, isActive: activeLoopID == loop.id)
+                                        .id(loop.id)
+                                        .frame(width: proxy.size.width, height: proxy.size.height)
+                                case .vine:
+                                    ClassicVineClipCard(loop: loop, isActive: activeLoopID == loop.id)
+                                        .id(loop.id)
+                                        .frame(width: proxy.size.width, height: proxy.size.height)
+                                case .ugc:
+                                    LoopClipCard(
+                                        loop: $loop,
+                                        isActive: activeLoopID == loop.id,
+                                        onOpenComments: { selectedComments = loop },
+                                        onSend: { selectedSendLoop = loop },
+                                        onRemix: { selectedRemixLoop = loop },
+                                        onToggleLike: { liked in
+                                            await toggleLike(loopID: loop.id, liked: liked)
+                                        },
+                                        onToggleFollow: { following in
+                                            await toggleFollow(userID: loop.creator.id, following: following)
+                                        }
+                                    )
+                                    .id(loop.id)
+                                    .frame(width: proxy.size.width, height: proxy.size.height)
+                                }
                             }
                         }
                         .scrollTargetLayout()
@@ -290,7 +301,7 @@ private struct LoopClipCard: View {
                         HStack(spacing: 6) {
                             Image(systemName: "link")
                                 .foregroundStyle(Color.loopGreen)
-                            Text("0:06")
+                            Text(loop.durationLabel)
                                 .font(.system(size: 13, weight: .black))
                                 .foregroundStyle(.white)
                         }
@@ -362,7 +373,7 @@ private struct LoopClipCard: View {
                 }
             }
 
-            CaptionText(caption: loop.caption)
+            CaptionText(caption: loop.displayCaption)
 
             if !loop.hashtags.isEmpty {
                 ScrollView(.horizontal) {
@@ -439,6 +450,178 @@ private struct LoopClipCard: View {
         isLiking = true
         await onToggleLike(!loop.didLike)
         isLiking = false
+    }
+}
+
+private struct PromotedClipCard: View {
+    let loop: LoopClip
+    let isActive: Bool
+
+    var body: some View {
+        ReadOnlyFeedClipCard(
+            loop: loop,
+            isActive: isActive,
+            badgeTitle: "Ad",
+            badgeSystemImage: "megaphone.fill",
+            title: loop.sponsorName ?? loop.creator.displayName,
+            subtitle: loop.disclosure ?? "Sponsored video",
+            accent: .loopWarm,
+            callToActionTitle: "Learn More",
+            callToActionURL: loop.callToActionURL
+        )
+    }
+}
+
+private struct ClassicVineClipCard: View {
+    let loop: LoopClip
+    let isActive: Bool
+
+    var body: some View {
+        ReadOnlyFeedClipCard(
+            loop: loop,
+            isActive: isActive,
+            badgeTitle: "Classic Vine",
+            badgeSystemImage: "leaf.fill",
+            title: loop.creator.displayName,
+            subtitle: "Vine archive",
+            accent: .loopGreen,
+            callToActionTitle: nil,
+            callToActionURL: nil
+        )
+    }
+}
+
+private struct ReadOnlyFeedClipCard: View {
+    let loop: LoopClip
+    let isActive: Bool
+    let badgeTitle: String
+    let badgeSystemImage: String
+    let title: String
+    let subtitle: String
+    let accent: Color
+    let callToActionTitle: String?
+    let callToActionURL: URL?
+
+    @State private var manualPaused = false
+    @State private var isCellVisible = false
+
+    var body: some View {
+        ZStack {
+            LoopPlayerView(url: loop.videoURL, isActive: isActive && isCellVisible && !manualPaused)
+
+            LinearGradient(
+                colors: [.black.opacity(0.22), .clear, .black.opacity(0.82)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            if isActive && manualPaused {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 38, weight: .black))
+                    .foregroundStyle(.white)
+                    .padding(20)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    GlassPill {
+                        HStack(spacing: 6) {
+                            Image(systemName: badgeSystemImage)
+                                .foregroundStyle(accent)
+                            Text(badgeTitle)
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .padding(.top, 102)
+                .padding(.horizontal, 15)
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        AvatarView(user: loop.creator, size: 32)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(title)
+                                .font(.system(size: 15, weight: .black))
+                                .foregroundStyle(.white)
+                            Text(subtitle)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.68))
+                        }
+
+                        Spacer()
+
+                        GlassPill {
+                            Text(loop.durationLabel)
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                    }
+
+                    CaptionText(caption: loop.displayCaption)
+
+                    if !loop.hashtags.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 6) {
+                                ForEach(loop.hashtags.prefix(5), id: \.self) { tag in
+                                    Text("#\(tag)")
+                                        .font(.system(size: 12, weight: .black))
+                                        .foregroundStyle(accent)
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 5)
+                                        .background(.black.opacity(0.42), in: Capsule())
+                                }
+                            }
+                        }
+                        .scrollIndicators(.hidden)
+                    }
+
+                    if let callToActionTitle, let callToActionURL {
+                        Button {
+                            UIApplication.shared.open(callToActionURL)
+                        } label: {
+                            Label(callToActionTitle, systemImage: "arrow.up.right.circle.fill")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 15)
+                .padding(.bottom, 94)
+                .shadow(color: .black.opacity(0.55), radius: 5, y: 2)
+            }
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isActive else {
+                return
+            }
+            withAnimation(.snappy(duration: 0.18)) {
+                manualPaused.toggle()
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            if active {
+                manualPaused = false
+            }
+        }
+        .onAppear {
+            isCellVisible = true
+        }
+        .onDisappear {
+            isCellVisible = false
+        }
     }
 }
 
@@ -592,7 +775,7 @@ private struct RemixLoopSheet: View {
     let onCreateDraft: (String) -> Void
 
     private var remixDraft: String {
-        let baseCaption = loop.caption.isEmpty ? "this loop" : loop.caption
+        let baseCaption = loop.displayCaption.isEmpty ? "this loop" : loop.displayCaption
         return "Remix @\(loop.creator.username): \(baseCaption)"
     }
 

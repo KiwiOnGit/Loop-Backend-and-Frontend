@@ -447,7 +447,7 @@ struct LoopSummaryRow: View {
             .frame(width: 64, height: 82)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(loop.caption.isEmpty ? "Untitled loop" : loop.caption)
+                Text(loop.displayCaption.isEmpty ? "Untitled loop" : loop.displayCaption)
                     .font(.system(size: 14, weight: .black))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
@@ -462,7 +462,7 @@ struct LoopSummaryRow: View {
                 HStack(spacing: 10) {
                     Label(loop.likeCount.compactCount, systemImage: "heart.fill")
                     Label(loop.commentCount.compactCount, systemImage: "bubble.left.fill")
-                    Label("\(loop.durationSeconds.oneDecimal)s", systemImage: "timer")
+                    Label(loop.durationLabel, systemImage: "timer")
                 }
                 .font(.caption2.weight(.black))
                 .foregroundStyle(.secondary)

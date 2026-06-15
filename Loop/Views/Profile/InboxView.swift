@@ -213,7 +213,8 @@ private struct ConversationRow: View {
             return "No messages yet"
         }
         if let loop = message.loop {
-            return message.body.isEmpty ? "Sent a loop: \(loop.caption)" : message.body
+            let caption = loop.displayCaption.isEmpty ? "Untitled loop" : loop.displayCaption
+            return message.body.isEmpty ? "Sent a loop: \(caption)" : message.body
         }
         return message.body
     }

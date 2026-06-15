@@ -31,6 +31,12 @@ const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "dvfindvne";
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "121998653439447";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "3vFMmWI1huqi-FavGNfzbH54aQw";
 const CLOUDINARY_AUTH = "Basic " + Buffer.from(CLOUDINARY_API_KEY + ":" + CLOUDINARY_API_SECRET).toString("base64");
+const REQUIRE_CLOUD_VIDEO_STREAMING = process.env.LOOP_REQUIRE_CLOUD_VIDEO_STREAMING !== "0";
+const CATALOG_CACHE_MS = Number(process.env.LOOP_CATALOG_CACHE_SECONDS || 300) * 1000;
+const VINE_MANIFEST_URL = process.env.LOOP_VINES_MANIFEST_URL ||
+  (CLOUDINARY_CLOUD_NAME ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/raw/upload/loop_vines.json` : "");
+const ADS_MANIFEST_URL = process.env.LOOP_ADS_MANIFEST_URL ||
+  (CLOUDINARY_CLOUD_NAME ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/raw/upload/loop_ads.json` : "");
 
 // AES-256-CBC Encryption Helpers
 function encrypt(text, secret) {
@@ -151,6 +157,9 @@ const emptyDB = () => ({
 });
 
 let db = emptyDB(); // Will be populated asynchronously on startup
+let vineCatalog = [];
+let adCatalog = [];
+let lastCatalogRefreshAt = 0;
 
 async function loadDB() {
   // 1. Try to load from Cloudinary first
@@ -285,6 +294,284 @@ function absoluteURL(req, pathname) {
   return `${proto}://${req.headers.host}${pathname}`;
 }
 
+function cleanText(value, fallback = "") {
+  return String(value || fallback).trim();
+}
+
+function normalizeHTTPSURL(value) {
+  const candidate = cleanText(value);
+  if (!candidate) {
+    return null;
+  }
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function stableCatalogId(prefix, videoURL, index) {
+  const hash = crypto.createHash("sha256").update(`${videoURL}:${index}`).digest("hex").slice(0, 16);
+  return `${prefix}_${hash}`;
+}
+
+function catalogArray(payload, key) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload && Array.isArray(payload[key])) {
+    return payload[key];
+  }
+  return [];
+}
+
+function normalizeCatalogDuration(value, fallback = 6) {
+  const duration = Number(value || fallback);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return fallback;
+  }
+  return Math.min(MAX_DURATION_SECONDS, Number(duration.toFixed(2)));
+}
+
+function normalizeVineEntry(entry, index) {
+  const videoURL = normalizeHTTPSURL(entry.videoURL || entry.url || entry.secure_url);
+  if (!videoURL) {
+    return null;
+  }
+  const caption = cleanText(entry.caption || entry.title, "Classic Vine");
+  const durationSeconds = normalizeCatalogDuration(entry.durationSeconds || entry.duration, 6);
+  return {
+    id: cleanText(entry.id) || stableCatalogId("vine", videoURL, index),
+    caption,
+    durationSeconds,
+    videoURL,
+    thumbnailURL: normalizeHTTPSURL(entry.thumbnailURL || entry.thumbnail_url),
+    createdAt: cleanText(entry.createdAt || entry.created_at, "2013-01-24T00:00:00.000Z"),
+    creatorName: cleanText(entry.creatorName || entry.creator || entry.author, "Classic Vine"),
+    originalURL: normalizeHTTPSURL(entry.originalURL || entry.permalink),
+    hashtags: Array.isArray(entry.hashtags) ? entry.hashtags.map((tag) => cleanText(tag).replace(/^#/, "").toLowerCase()).filter(Boolean) : extractHashtags(caption)
+  };
+}
+
+function normalizeAdEntry(entry, index) {
+  const videoURL = normalizeHTTPSURL(entry.videoURL || entry.url || entry.secure_url);
+  if (!videoURL) {
+    return null;
+  }
+  const caption = cleanText(entry.caption || entry.title, "Sponsored video");
+  const sponsorName = cleanText(entry.sponsorName || entry.advertiserName || entry.advertiser, "Sponsored");
+  const provider = cleanText(entry.provider, "direct").toLowerCase();
+  return {
+    id: cleanText(entry.id) || stableCatalogId("ad", videoURL, index),
+    caption,
+    durationSeconds: normalizeCatalogDuration(entry.durationSeconds || entry.duration, 15),
+    videoURL,
+    thumbnailURL: normalizeHTTPSURL(entry.thumbnailURL || entry.thumbnail_url),
+    createdAt: cleanText(entry.createdAt || entry.created_at, nowISO()),
+    sponsorName,
+    provider,
+    disclosure: cleanText(entry.disclosure, "Ad"),
+    callToActionURL: normalizeHTTPSURL(entry.callToActionURL || entry.ctaURL || entry.clickURL),
+    hashtags: Array.isArray(entry.hashtags) ? entry.hashtags.map((tag) => cleanText(tag).replace(/^#/, "").toLowerCase()).filter(Boolean) : extractHashtags(caption)
+  };
+}
+
+async function loadCloudCatalog(url, key, normalizer) {
+  if (!url) {
+    return [];
+  }
+  try {
+    const body = await fetchURL(url);
+    const payload = JSON.parse(body);
+    return catalogArray(payload, key).map(normalizer).filter(Boolean);
+  } catch (error) {
+    console.warn(`[loop] could not load ${key} catalog from cloud:`, error.message);
+    return [];
+  }
+}
+
+async function refreshCloudCatalogs(force = false) {
+  const now = Date.now();
+  if (!force && now - lastCatalogRefreshAt < CATALOG_CACHE_MS) {
+    return;
+  }
+  lastCatalogRefreshAt = now;
+  const [vines, ads] = await Promise.all([
+    loadCloudCatalog(VINE_MANIFEST_URL, "vines", normalizeVineEntry),
+    loadCloudCatalog(ADS_MANIFEST_URL, "ads", normalizeAdEntry)
+  ]);
+  vineCatalog = vines;
+  adCatalog = ads;
+}
+
+function virtualUser(id, username, displayName, bio, avatarColor) {
+  return {
+    id,
+    username,
+    displayName,
+    bio,
+    avatarColor,
+    avatarURL: null,
+    createdAt: "2013-01-24T00:00:00.000Z",
+    followerCount: 0,
+    followingCount: 0,
+    loopCount: 0,
+    isFollowedByViewer: false
+  };
+}
+
+function formatVineClip(vine) {
+  const creator = virtualUser(
+    "vine_archive",
+    "vine",
+    vine.creatorName || "Classic Vine",
+    "Classic Vine archive",
+    "#00BF8F"
+  );
+  return {
+    id: vine.id,
+    caption: vine.caption,
+    durationSeconds: vine.durationSeconds,
+    category: vine.durationSeconds <= 6.25 ? "6s" : "60s",
+    videoURL: vine.videoURL,
+    thumbnailURL: vine.thumbnailURL,
+    createdAt: vine.createdAt,
+    creator,
+    likeCount: 0,
+    commentCount: 0,
+    didLike: false,
+    hashtags: vine.hashtags,
+    mentions: [],
+    commentsPreview: [],
+    source: "vine",
+    sponsorName: null,
+    provider: null,
+    disclosure: "Classic Vine",
+    callToActionURL: vine.originalURL
+  };
+}
+
+function formatAdClip(ad) {
+  const creator = virtualUser(
+    `ad_${ad.provider}`,
+    `${ad.provider}_ads`,
+    ad.sponsorName,
+    ad.disclosure,
+    "#F97316"
+  );
+  return {
+    id: ad.id,
+    caption: ad.caption,
+    durationSeconds: ad.durationSeconds,
+    category: ad.durationSeconds <= 6.25 ? "6s" : "60s",
+    videoURL: ad.videoURL,
+    thumbnailURL: ad.thumbnailURL,
+    createdAt: ad.createdAt,
+    creator,
+    likeCount: 0,
+    commentCount: 0,
+    didLike: false,
+    hashtags: ad.hashtags,
+    mentions: [],
+    commentsPreview: [],
+    source: "ad",
+    sponsorName: ad.sponsorName,
+    provider: ad.provider,
+    disclosure: ad.disclosure,
+    callToActionURL: ad.callToActionURL
+  };
+}
+
+function interleaveVines(loops, vines) {
+  if (!vines.length) {
+    return loops;
+  }
+  if (!loops.length) {
+    return vines;
+  }
+
+  const mixed = [];
+  let vineIndex = 0;
+  for (let index = 0; index < loops.length; index += 1) {
+    mixed.push(loops[index]);
+    if ((index + 1) % 3 === 0 && vineIndex < vines.length) {
+      mixed.push(vines[vineIndex]);
+      vineIndex += 1;
+    }
+  }
+
+  while (vineIndex < vines.length) {
+    mixed.push(vines[vineIndex]);
+    vineIndex += 1;
+  }
+  return mixed;
+}
+
+function insertAdBreaks(items, ads) {
+  if (!ads.length) {
+    return items;
+  }
+
+  const result = [];
+  let adIndex = 0;
+  let sinceLastAd = 0;
+  let nextBreak = 5 + crypto.randomInt(6);
+
+  for (const item of items) {
+    result.push(item);
+    if (item.source === "ad") {
+      continue;
+    }
+    sinceLastAd += 1;
+    if (sinceLastAd >= nextBreak) {
+      result.push(ads[adIndex % ads.length]);
+      adIndex += 1;
+      sinceLastAd = 0;
+      nextBreak = 5 + crypto.randomInt(6);
+    }
+  }
+  return result;
+}
+
+function normalizeGeneratedCaption(rawCaption) {
+  const lines = String(rawCaption || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\*\*/g, "").replace(/__/g, "").trim())
+    .filter(Boolean);
+  const labels = new Set(["title", "caption", "description", "desc", "hashtags", "tags"]);
+  let sawLabel = false;
+  let title = "";
+  let description = "";
+  let hashtags = "";
+  const unlabeled = [];
+
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z ]+):\s*(.*)$/);
+    const label = match ? match[1].trim().toLowerCase() : "";
+    if (match && labels.has(label)) {
+      sawLabel = true;
+      const value = match[2].trim().replace(/^["']|["']$/g, "");
+      if (label === "title" || label === "caption") title = value;
+      else if (label === "description" || label === "desc") description = value;
+      else hashtags = value;
+    } else {
+      unlabeled.push(line);
+    }
+  }
+
+  if (!sawLabel) {
+    return String(rawCaption || "").trim();
+  }
+  if (!description && unlabeled.length) {
+    description = unlabeled.join(" ");
+  }
+  return [title, description, hashtags].map((part) => part.trim()).filter(Boolean).join("\n\n");
+}
+
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
@@ -409,7 +696,7 @@ function formatLoop(req, loop, viewerId) {
   const creator = db.users.find((user) => user.id === loop.creatorId);
   return {
     id: loop.id,
-    caption: loop.caption,
+    caption: normalizeGeneratedCaption(loop.caption),
     durationSeconds: loop.durationSeconds,
     category: loop.category || (loop.durationSeconds <= 6.25 ? "6s" : "60s"),
     videoURL: loop.videoURL || absoluteURL(req, `/videos/${encodeURIComponent(loop.videoFileName)}`),
@@ -421,7 +708,12 @@ function formatLoop(req, loop, viewerId) {
     didLike: Boolean(viewerId && db.likes.some((like) => like.loopId === loop.id && like.userId === viewerId)),
     hashtags: loop.hashtags || extractHashtags(loop.caption),
     mentions: loop.mentions || extractMentions(loop.caption),
-    commentsPreview: previewComments(loop.id)
+    commentsPreview: previewComments(loop.id),
+    source: "ugc",
+    sponsorName: null,
+    provider: null,
+    disclosure: null,
+    callToActionURL: null
   };
 }
 
@@ -788,7 +1080,10 @@ async function route(req, res) {
       ok: true,
       app: "Loop",
       storage: DATA_DIR,
-      maxDurationSeconds: MAX_DURATION_SECONDS
+      maxDurationSeconds: MAX_DURATION_SECONDS,
+      cloudVideoStreamingRequired: REQUIRE_CLOUD_VIDEO_STREAMING,
+      vineCatalogSize: vineCatalog.length,
+      adCatalogSize: adCatalog.length
     });
     return;
   }
@@ -910,6 +1205,7 @@ async function route(req, res) {
 
   if (req.method === "GET" && pathname === "/api/feed") {
     const viewer = getBearerUser(req);
+    await refreshCloudCatalogs();
     const scope = url.searchParams.get("scope") || "forYou";
     const categoryQuery = url.searchParams.get("category") || "both";
     const followingIds = new Set(
@@ -919,6 +1215,9 @@ async function route(req, res) {
     if (scope === "following") {
       loops = loops.filter((loop) => loop.creatorId === viewer.id || followingIds.has(loop.creatorId));
     }
+    if (REQUIRE_CLOUD_VIDEO_STREAMING) {
+      loops = loops.filter((loop) => Boolean(loop.videoURL));
+    }
     
     if (categoryQuery === "6s") {
       loops = loops.filter((loop) => loop.category === "6s" || (!loop.category && loop.durationSeconds <= 6.25));
@@ -927,7 +1226,25 @@ async function route(req, res) {
     }
     
     loops.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    sendJSON(res, 200, { loops: loops.map((loop) => formatLoop(req, loop, viewer.id)) });
+    const ugcItems = loops.map((loop) => formatLoop(req, loop, viewer.id));
+    const vineItems = scope === "following"
+      ? []
+      : vineCatalog
+          .filter((vine) => {
+            if (categoryQuery === "6s") return vine.durationSeconds <= 6.25;
+            if (categoryQuery === "60s") return vine.durationSeconds > 6.25;
+            return true;
+          })
+          .map(formatVineClip);
+    const contentItems = interleaveVines(ugcItems, vineItems);
+    const adItems = adCatalog
+      .filter((ad) => {
+        if (categoryQuery === "6s") return ad.durationSeconds <= 6.25;
+        if (categoryQuery === "60s") return ad.durationSeconds > 6.25;
+        return true;
+      })
+      .map(formatAdClip);
+    sendJSON(res, 200, { loops: insertAdBreaks(contentItems, adItems) });
     return;
   }
 
@@ -942,6 +1259,7 @@ async function route(req, res) {
       .slice(0, 12)
       .map((user) => publicUser(user, viewer.id, req));
     const loops = [...db.loops]
+      .filter((loop) => !REQUIRE_CLOUD_VIDEO_STREAMING || Boolean(loop.videoURL))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 12)
       .map((loop) => formatLoop(req, loop, viewer.id));
@@ -969,7 +1287,10 @@ async function route(req, res) {
     sendJSON(res, 200, {
       users: users.slice(0, 30).map((user) => publicUser(user, viewer.id, req)),
       hashtags,
-      loops: loops.slice(0, 30).map((loop) => formatLoop(req, loop, viewer.id))
+      loops: loops
+        .filter((loop) => !REQUIRE_CLOUD_VIDEO_STREAMING || Boolean(loop.videoURL))
+        .slice(0, 30)
+        .map((loop) => formatLoop(req, loop, viewer.id))
     });
     return;
   }
@@ -1005,11 +1326,15 @@ async function route(req, res) {
     }
 
     const videoFileName = `${makeId("loop")}${ext}`;
-    const caption = String(fields.caption || "").trim().slice(0, 220);
-    const category = fields.category === "60s" ? "60s" : "6s";
+    const caption = normalizeGeneratedCaption(fields.caption).slice(0, 220);
+    const category = durationSeconds <= 6.25 ? "6s" : "60s";
     
-    // Attempt cloud video upload, fallback to local file
+    // Attempt cloud video upload. In production, uploaded videos must stream from cloud storage.
     const cloudURL = await uploadToCloudinary(upload.data, ext);
+    if (!cloudURL && REQUIRE_CLOUD_VIDEO_STREAMING) {
+      sendError(res, 503, "Cloud video upload failed. Try again once cloud media storage is available.");
+      return;
+    }
     
     const loop = {
       id: makeId("lop"),
@@ -1024,7 +1349,7 @@ async function route(req, res) {
       createdAt: nowISO()
     };
 
-    if (!cloudURL) {
+    if (!cloudURL && !REQUIRE_CLOUD_VIDEO_STREAMING) {
       fs.writeFileSync(path.join(VIDEO_DIR, videoFileName), upload.data);
     }
     db.loops.push(loop);
@@ -1267,6 +1592,7 @@ async function route(req, res) {
     }
     const loops = db.loops
       .filter((loop) => loop.creatorId === userId)
+      .filter((loop) => !REQUIRE_CLOUD_VIDEO_STREAMING || Boolean(loop.videoURL))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((loop) => formatLoop(req, loop, viewer.id));
     sendJSON(res, 200, { user: publicUser(user, viewer.id, req), loops });
@@ -1366,6 +1692,7 @@ const server = http.createServer((req, res) => {
 
 async function startServer() {
   db = await loadDB();
+  await refreshCloudCatalogs(true);
   saveDB(); // Upload the initial encrypted database backup on startup
   server.listen(PORT, HOST, () => {
     console.log(`[loop] server listening on http://${HOST}:${PORT}`);

@@ -9,6 +9,7 @@ struct LoopApp: App {
             RootView()
                 .environmentObject(session)
                 .task {
+                    AdvertisingService.shared.configure()
                     await session.bootstrap()
                 }
         }

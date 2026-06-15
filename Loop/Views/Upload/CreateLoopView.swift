@@ -39,7 +39,6 @@ struct CreateLoopView: View {
     @State private var stage: CreateStage = .recording
     @State private var isAIGenerating = false
     @State private var maxDuration = 6.0
-    @State private var postCategory = "6s"
 
     init(draftCaption: Binding<String> = .constant(""), onUploaded: @escaping () -> Void) {
         self._draftCaption = draftCaption
@@ -609,17 +608,23 @@ struct CreateLoopView: View {
                         }
                         .padding(.top, 4)
                         
-                        // Category selection
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Post Category")
                                 .font(.system(size: 14, weight: .black))
                                 .foregroundStyle(Color.loopInk)
-                            
-                            Picker("Post Category", selection: $postCategory) {
-                                Text("6s Video Category").tag("6s")
-                                Text("60s Video Category").tag("60s")
+
+                            HStack(spacing: 8) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 14, weight: .black))
+                                    .foregroundStyle(Color.loopGreen)
+                                Text("Automatic: \(categoryTitle(for: durationSeconds))")
+                                    .font(.system(size: 13, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.loopInk)
+                                Spacer()
                             }
-                            .pickerStyle(.segmented)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .background(Color.loopMist, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .padding(.top, 8)
                         
@@ -676,7 +681,6 @@ struct CreateLoopView: View {
             }
             selectedVideoURL = url
             durationSeconds = min(seconds, maxDuration)
-            postCategory = seconds <= 6.25 ? "6s" : "60s"
             stage = .replaying
             
             // Trigger background on-device AI generation
@@ -747,17 +751,17 @@ struct CreateLoopView: View {
         if #available(iOS 26.0, *), LoopIdeaProvider.isAvailable {
             do {
                 let session = LanguageModelSession(
-                    instructions: "You are an on-device AI assistant. Generate a premade title, some hashtags, and a description using the account name '\(accountName)' for a short video based on its transcript."
+                    instructions: "You are an on-device AI assistant. Generate a short social video caption. Return only the final user-facing text with no labels, no Markdown, and no quoted field names."
                 )
                 let response = try await session.respond(
                     to: """
                     The video has the transcript: "\(transcript)".
                     The video has \(soundName) audio and uses the \(filterName) filter.
-                    Create a catchy title, a short 1-sentence description referencing \(accountName)'s page, and 3 hashtags.
+                    Write exactly three blocks separated by blank lines: a catchy title, a short one-sentence description referencing \(accountName)'s page, and 3 hashtags.
                     """
                 )
                 DispatchQueue.main.async {
-                    self.caption = response.content
+                    self.caption = LoopCaptionFormatter.display(response.content)
                     self.isAIGenerating = false
                 }
                 return
@@ -811,7 +815,7 @@ struct CreateLoopView: View {
         }
         
         DispatchQueue.main.async {
-            self.caption = finalAIOutput
+            self.caption = LoopCaptionFormatter.display(finalAIOutput)
             self.isAIGenerating = false
         }
     }
@@ -829,11 +833,12 @@ struct CreateLoopView: View {
         errorMessage = nil
         defer { isUploading = false }
         do {
+            let cleanedCaption = LoopCaptionFormatter.display(caption)
             _ = try await session.apiClient.uploadLoop(
                 videoURL: selectedVideoURL,
-                caption: caption,
+                caption: cleanedCaption,
                 durationSeconds: durationSeconds,
-                category: postCategory,
+                category: categoryValue(for: durationSeconds),
                 token: token
             )
             caption = ""
@@ -854,9 +859,20 @@ struct CreateLoopView: View {
             return
         }
         if caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            caption = draft
+            caption = LoopCaptionFormatter.display(draft)
         }
         draftCaption = ""
+    }
+
+    private func categoryValue(for duration: Double?) -> String {
+        guard let duration else {
+            return "6s"
+        }
+        return duration <= 6.25 ? "6s" : "60s"
+    }
+
+    private func categoryTitle(for duration: Double?) -> String {
+        categoryValue(for: duration) == "6s" ? "6s Video Category" : "60s Video Category"
     }
 }
 

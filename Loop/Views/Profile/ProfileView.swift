@@ -192,7 +192,7 @@ private struct LoopGridTile: View {
                 .background(.black.opacity(0.26), in: Circle())
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Text(loop.caption.isEmpty ? "Loop" : loop.caption)
+            Text(loop.displayCaption.isEmpty ? "Loop" : loop.displayCaption)
                 .font(.system(size: 10, weight: .black))
                 .foregroundStyle(.white)
                 .lineLimit(2)
@@ -205,7 +205,7 @@ private struct LoopGridTile: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.loopLine, lineWidth: 1)
         }
-        .accessibilityLabel(loop.caption.isEmpty ? "Loop video" : loop.caption)
+        .accessibilityLabel(loop.displayCaption.isEmpty ? "Loop video" : loop.displayCaption)
     }
 }
 

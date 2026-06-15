@@ -7,11 +7,14 @@ Loop is a local-first iOS MVP for six-second videos. It includes a SwiftUI iOS a
 - Real sign-up and sign-in with scrypt-hashed passwords.
 - Bearer-token API auth stored in the iOS keychain.
 - Vertical short-video feed with For You and Following modes.
+- Cloud-streamed promoted video ad breaks every 5-10 feed videos when an ad catalog is configured.
+- Cloud-streamed Classic Vine archive videos mixed into the For You feed when a Vine catalog is configured.
 - Six-second-only camera recording and upload checks.
 - Custom AVFoundation camera with six-second progress, camera flip, library fallback, and filter presets.
 - Server-side video duration enforcement for MP4/MOV/M4V metadata.
 - Local filesystem video storage on the Mac/server host.
-- HTTP range video streaming for AVPlayer.
+- Cloudinary video storage for uploaded videos by default, with local filesystem fallback only when `LOOP_REQUIRE_CLOUD_VIDEO_STREAMING=0`.
+- HTTP range video streaming for local development fallback videos.
 - Profiles, avatar uploads, bios, creator search, follows, likes, comments, comments preview, and user loop lists.
 - Discover with creators, hashtags, and loop search.
 - Inbox with conversations, text messages, loop sharing, activity notifications, and local iOS notifications.
@@ -103,6 +106,9 @@ PORT=4000
 LOOP_SECRET=replace-with-a-long-random-secret
 LOOP_DATA_DIR=/absolute/path/to/loop-data
 LOOP_MAX_VIDEO_MB=80
+LOOP_REQUIRE_CLOUD_VIDEO_STREAMING=1
+LOOP_ADS_MANIFEST_URL=https://res.cloudinary.com/YOUR_CLOUD_NAME/raw/upload/loop_ads.json
+LOOP_VINES_MANIFEST_URL=https://res.cloudinary.com/YOUR_CLOUD_NAME/raw/upload/loop_vines.json
 ```
 
 Example:
@@ -158,6 +164,12 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 - `POST /api/loops`
 - `POST /api/loops/:id/like`
 - `DELETE /api/loops/:id/like`
+
+## Ad and Vine Cloud Catalogs
+
+Loop reads promoted video ads from `LOOP_ADS_MANIFEST_URL` or, by default, `https://res.cloudinary.com/$CLOUDINARY_CLOUD_NAME/raw/upload/loop_ads.json`. It reads Classic Vine archive videos from `LOOP_VINES_MANIFEST_URL` or `loop_vines.json` in the same Cloudinary account.
+
+Use [server/loop_ads.example.json](/Users/elywright/Documents/Loop/server/loop_ads.example.json) and [server/loop_vines.example.json](/Users/elywright/Documents/Loop/server/loop_vines.example.json) as templates. Every `videoURL` must be HTTPS so the app streams the video from the cloud.
 - `GET /api/loops/:id/comments`
 - `POST /api/loops/:id/comments`
 - `POST /api/users/:id/follow`
