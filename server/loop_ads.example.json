@@ -1,0 +1,15 @@
+{
+  "ads": [
+    {
+      "id": "google_launch_001",
+      "provider": "google",
+      "sponsorName": "Example Sponsor",
+      "disclosure": "Ad",
+      "caption": "Sponsored video from Example Sponsor #ad",
+      "durationSeconds": 15,
+      "videoURL": "https://res.cloudinary.com/YOUR_CLOUD_NAME/video/upload/YOUR_AD_VIDEO.mp4",
+      "thumbnailURL": "https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/YOUR_AD_THUMBNAIL.jpg",
+      "callToActionURL": "https://example.com"
+    }
+  ]
+}

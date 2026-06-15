@@ -1,0 +1,13 @@
+{
+  "vines": [
+    {
+      "id": "vine_archive_001",
+      "creatorName": "Classic Vine",
+      "caption": "A classic six-second Vine moment #vine",
+      "durationSeconds": 6,
+      "videoURL": "https://res.cloudinary.com/YOUR_CLOUD_NAME/video/upload/YOUR_VINE_VIDEO.mp4",
+      "thumbnailURL": "https://res.cloudinary.com/YOUR_CLOUD_NAME/image/upload/YOUR_VINE_THUMBNAIL.jpg",
+      "originalURL": "https://example.com/original-vine-source"
+    }
+  ]
+}
